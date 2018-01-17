@@ -1,0 +1,18 @@
+{{template "base/head" .}}
+<div class="explore code">
+  <div class="ui container">
+    <div class="ui grid">
+      {{template "explore/navbar" .}}
+      <div class="twelve wide column content">
+        {{template "explore/search" .}}
+
+        <div class="ui list">
+          {{.Output}}
+        </div>
+
+        {{template "explore/page" .}}
+      </div>
+    </div>
+  </div>
+</div>
+{{template "base/footer" .}}

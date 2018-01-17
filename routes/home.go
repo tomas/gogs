@@ -5,6 +5,14 @@
 package routes
 
 import (
+	"html"
+	"fmt"
+	"strings"
+	"html/template"
+	"regexp"
+	"os"
+	"os/exec"
+
 	"github.com/Unknwon/paginater"
 
 	"github.com/gogits/gogs/models"
@@ -15,6 +23,7 @@ import (
 
 const (
 	HOME                  = "home"
+	EXPLORE_CODE          = "explore/code"
 	EXPLORE_REPOS         = "explore/repos"
 	EXPLORE_USERS         = "explore/users"
 	EXPLORE_ORGANIZATIONS = "explore/organizations"
@@ -156,6 +165,92 @@ func ExploreOrganizations(c *context.Context) {
 		TplName:  EXPLORE_ORGANIZATIONS,
 	})
 }
+
+func ExploreCode(ctx *context.Context) {
+  ctx.Data["Title"] = "CodeSearch"
+  ctx.Data["PageIsExplore"] = true
+  ctx.Data["PageIsExploreCode"] = true
+
+  keyword := ctx.Query("q")
+  extname := ctx.Query("ext")
+
+  if ctx.IsLogged && len(keyword) > 0 {
+
+    // get workdir. we need it to determine where to call the script.
+    workDir, err := setting.WorkDir()
+    if err != nil {
+      fmt.Fprintln(os.Stderr, "Failed to get WorkDir: ", err)
+      ctx.Handle(500, "No WorkDir.", err)
+      return
+    }
+
+    // store full query for displaying in input later
+    ctx.Data["Keyword"] = keyword
+
+    // if query contains 'ext:foo', set foo as extension and remove from keyword
+    if strings.Contains(keyword, "ext:") {
+      re := regexp.MustCompile("ext:([a-z0-9]{1,5})")
+      extname = strings.Replace(re.FindString(keyword), "ext:", "", 1)
+      keyword = strings.Trim(re.ReplaceAllString(keyword, ""), " ")
+    }
+
+    var (
+      cmdOut []byte
+      boom   error
+    )
+
+    cmdName   := strings.Join([]string{workDir, "scripts", "searchcode"}, "/")
+    reposPath := strings.Join([]string{setting.RepoRootPath, ctx.User.Name}, "/")
+    cmdArgs   := []string{keyword, reposPath, extname}
+
+    if cmdOut, boom = exec.Command(cmdName, cmdArgs...).Output(); boom != nil {
+      fmt.Fprintln(os.Stderr, "There was an error running codesearch command: ", boom)
+      ctx.Handle(500, "Error running codesearch command.", boom)
+      return
+    }
+
+    result := string(cmdOut)
+    if len(result) > 5 {
+
+      output := strings.Join([]string{"\n", html.EscapeString(result), "</pre></div>"}, "")
+
+      reg, err := regexp.Compile("\n([0-9]+).")
+      if err != nil {
+        fmt.Fprintln(os.Stderr, "There was an error compiling the regex: ", err)
+        ctx.Handle(500, "Invalid regex.", err)
+        return
+      }
+
+      output = reg.ReplaceAllString(output, "\n<span>$1</span> ")
+
+      reg, err = regexp.Compile("\n([a-z0-9_\\.-]+): (.+)\n<span>([0-9]+)")
+      if err != nil {
+        fmt.Fprintln(os.Stderr, "There was an error compiling the regex: ", err)
+        ctx.Handle(500, "Invalid regex.", err)
+        return
+      }
+
+      output = reg.ReplaceAllString(output, "</pre></div>\n<div class='codesearch'>\n<a href='/{USERNAME}/$1'>$1</a> -- <a href='/{USERNAME}/$1/src/master/$2#L$3'>$2</a>\n<pre class='raw'><span>$3")
+
+      output = strings.Replace(output, "{USERNAME}", ctx.User.Name, -1) // replace {USERNAME} with real username
+      output = strings.Replace(output, "</pre></div>", "", 1) // remove first occurence
+      output = strings.Replace(output, "--</pre>", "</pre>", -1) // remove trailing --'s
+      output = strings.Replace(output, "\n--\n", "\n<span>--</span>\n", -1) // and wrap remaining --'s in span elements
+
+      ctx.Data["Output"]  = template.HTML(output)
+
+    } else {
+      ctx.Data["Output"] = ""
+    }
+
+  } else {
+    ctx.Data["Output"] = ""
+  }
+
+  // fmt.Fprintln(os.Stdout, result)
+  ctx.HTML(200, EXPLORE_CODE)
+}
+
 
 func NotFound(c *context.Context) {
 	c.Data["Title"] = "Page Not Found"

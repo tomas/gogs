@@ -1,0 +1,31 @@
+#!/bin/sh
+
+string="$1"
+repos_dir="$2"
+extension="$3"
+[ -z "$repos_dir" ] && repos_dir=$(dirname "$0")
+
+# -I means don't search in binary files
+git_grep_opts="--ignore-case --color=never --heading --line-number -I --context=2"
+
+if [ -z "$string" ]; then
+  echo "Usage: $0 [string]"
+  exit 2
+fi
+
+if [ -n "$extension" ]; then
+  path_opts="*.${extension}"
+fi
+
+cd "$repos_dir"
+for dir in *; do
+  if ([ -d "${dir}/.git" ] || [ -d "${dir}/hooks" ]) && [ ! -f "${dir}/.searchignore" ]; then
+    repo=$(echo "$dir" | sed "s/\.git//")
+    cd "${repos_dir}/${dir}"
+    # echo "processing $dir"
+    git grep $git_grep_opts "$string" HEAD -- $path_opts 2> /dev/null | sed "s/^HEAD:/${repo}: /g"
+    cd ..
+  fi
+done
+
+cd - > /dev/null
